@@ -668,10 +668,22 @@ tr:hover td{background:var(--surface);}
             </div>
           </div>
           <div class="fg"><label class="fl">發送對象</label>
-            <select class="fs" id="bc-target">
+            <select class="fs" id="bc-target" onchange="onBcTargetChange(this.value)">
               <option value="all">全部志工</option>
               <option value="group">指定群組</option>
+              <option value="member">指定成員</option>
             </select>
+          </div>
+          <div id="bc-group-wrap" class="fg hidden">
+            <label class="fl">選擇群組</label>
+            <select class="fs" id="bc-group-id"></select>
+          </div>
+          <div id="bc-member-wrap" class="fg hidden">
+            <label class="fl">選擇成員</label>
+            <input class="fi" id="bc-member-search" placeholder="輸入姓名搜尋..." oninput="renderBcMemberList(this.value)">
+            <div id="bc-member-list" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-top:5px;"></div>
+            <input type="hidden" id="bc-member-id">
+            <div id="bc-member-selected" style="font-size:11px;color:var(--sage);margin-top:5px;font-weight:600;"></div>
           </div>
           <div class="fg"><label class="fl">訊息標題</label><input class="fi" id="bc-title" placeholder="通知標題..."></div>
           <div class="fg"><label class="fl">訊息內容</label><textarea class="ft" id="bc-content" placeholder="通知內容..." style="min-height:100px;"></textarea></div>
@@ -846,6 +858,37 @@ tr:hover td{background:var(--surface);}
     <div class="m-foot">
       <button class="btn btn-outline" onclick="closeModal('modal-add-group')">取消</button>
       <button class="btn btn-primary" onclick="submitAddGroup()">建立群組</button>
+    </div>
+  </div>
+</div>
+
+<!-- 案件詳情 (管理員) -->
+<div class="overlay" id="modal-case-detail">
+  <div class="modal" style="max-width:600px;">
+    <div class="m-hd">
+      <div>
+        <div class="m-title" id="cd-title">案件詳情</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="cd-sub"></div>
+      </div>
+      <button class="m-close" onclick="closeModal('modal-case-detail')">✕</button>
+    </div>
+    <div class="m-body">
+      <div id="cd-info" style="background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;line-height:2;color:var(--text-secondary);"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        <div style="font-size:13px;">
+          報名：<span id="cd-count" style="font-family:'DM Mono',monospace;font-weight:700;color:var(--sky);"></span> 人 ／
+          已確認：<span id="cd-confirmed" style="font-family:'DM Mono',monospace;font-weight:700;color:var(--sage);"></span> 人 ／
+          需求：<span id="cd-required" style="font-family:'DM Mono',monospace;font-weight:700;"></span> 人
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="sendCaseNotification()">📩 發確認通知</button>
+      </div>
+      <div class="tabs">
+        <button class="tab active" onclick="cdTab('accept',this)">✋ 報名中</button>
+        <button class="tab" onclick="cdTab('confirm',this)">✅ 已確認</button>
+        <button class="tab" onclick="cdTab('standby',this)">⏳ 候補</button>
+        <button class="tab" onclick="cdTab('reject',this)">❌ 婉拒</button>
+      </div>
+      <div id="cd-list" style="margin-top:4px;"></div>
     </div>
   </div>
 </div>
@@ -1445,7 +1488,7 @@ function renderAdminCases() {
       <td><span class="chip ${statusChip(c.status)}">${c.status||'—'}</span></td>
       <td><div style="display:flex;gap:4px;">
         <button class="btn btn-sm btn-primary" onclick="openModal('modal-new-case')">編輯</button>
-        <button class="btn btn-sm btn-outline">詳情</button>
+        <button class="btn btn-sm btn-outline" onclick="openCaseDetail('${c.case_id}')">詳情</button>
       </div></td>
     </tr>`).join('')}</tbody></table>`;
 }
@@ -1484,14 +1527,27 @@ function setBType(t, btn) {
 }
 
 async function sendBroadcast() {
-  const title   = document.getElementById('bc-title').value;
-  const content = document.getElementById('bc-content').value;
-  const target  = document.getElementById('bc-target').value;
+  const title      = document.getElementById('bc-title').value;
+  const content    = document.getElementById('bc-content').value;
+  const targetType = document.getElementById('bc-target').value;
   if (!title) { showToast('⚠️ 請填寫標題'); return; }
+
+  let target = 'all';
+  if (targetType === 'group') {
+    target = document.getElementById('bc-group-id').value;
+    if (!target) { showToast('⚠️ 請選擇群組'); return; }
+  } else if (targetType === 'member') {
+    target = document.getElementById('bc-member-id').value;
+    if (!target) { showToast('⚠️ 請選擇成員'); return; }
+  }
+
   const result = await gasPost('addMessage', { type: bcType, title, content, target, sender: state.user?.name || 'admin' });
   showToast(result ? '📤 廣播已發送並儲存至 Sheets' : '📤 廣播已發送（示範模式）');
   document.getElementById('bc-title').value = '';
   document.getElementById('bc-content').value = '';
+  // 重設選擇器
+  document.getElementById('bc-target').value = 'all';
+  onBcTargetChange('all');
   await loadMessages();
 }
 
@@ -1559,6 +1615,169 @@ async function submitAddGroup() {
   showToast(result ? '🗂️ 群組已建立並寫入 Sheets' : '🗂️ 群組已建立（示範模式）');
   state.groups.push({ ...data, group_id: result?.group_id || 'G-TEMP', member_count: 0 });
   renderAdminGroups();
+}
+
+// ═══════════════════════════════════════
+// CASE DETAIL（管理員案件詳情）
+// ═══════════════════════════════════════
+function openCaseDetail(caseId) {
+  const c = state.cases.find(c => c.case_id === caseId);
+  if (!c) return;
+  state.currentCase = c;
+
+  document.getElementById('cd-title').textContent = c.title;
+  document.getElementById('cd-sub').textContent = `📍 ${c.location||'—'} ・ ${c.case_date||'—'}`;
+  document.getElementById('cd-info').innerHTML =
+    `📅 日期：${c.case_date||'—'} &nbsp;｜&nbsp; 📍 地點：${c.location||'—'} &nbsp;｜&nbsp; 📊 狀態：<span class="chip ${statusChip(c.status)}">${c.status||'—'}</span>`;
+
+  const replies = c.replies || [];
+  document.getElementById('cd-count').textContent     = replies.filter(r => r.reply_type === 'accept').length;
+  document.getElementById('cd-confirmed').textContent = replies.filter(r => r.reply_type === 'confirm').length;
+  document.getElementById('cd-required').textContent  = c.required_count || 0;
+
+  // 重設 tab
+  document.querySelectorAll('#modal-case-detail .tab').forEach((t,i) => t.classList.toggle('active', i===0));
+  renderCdList('accept');
+  openModal('modal-case-detail');
+}
+
+function cdTab(type, btn) {
+  document.querySelectorAll('#modal-case-detail .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderCdList(type);
+}
+
+function renderCdList(type) {
+  const c = state.currentCase;
+  if (!c) return;
+  const replies = (c.replies || []).filter(r => r.reply_type === type);
+  const el = document.getElementById('cd-list');
+  const typeLabel = { accept:'報名中', confirm:'已確認', standby:'候補', reject:'婉拒' };
+  if (!replies.length) {
+    el.innerHTML = `<div class="loading-row">目前無${typeLabel[type]||''}名單</div>`;
+    return;
+  }
+  el.innerHTML = replies.map(r => `
+    <div class="vr">
+      <div class="av av-g">${(r.vol_name||'?').slice(0,1)}</div>
+      <div class="vr-info">
+        <div class="vr-name">${r.vol_name||'—'}</div>
+        <div class="vr-meta">${fmtDate(r.replied_date)} ・ ${r.content||'（無留言）'}</div>
+      </div>
+      <div style="display:flex;gap:4px;flex-shrink:0;">
+        ${type === 'accept' ? `
+          <button class="btn btn-sm btn-primary"
+            onclick="confirmParticipantAction('${r.reply_id}','${r.vol_name}','${r.vol_id}','${c.case_id}')">✅ 確認</button>
+          <button class="btn btn-sm btn-outline"
+            onclick="setStandbyAction('${r.reply_id}','${r.vol_name}')">⏳ 候補</button>
+        ` : ''}
+        ${type === 'confirm' ? `<span class="chip chip-green">✅ 已確認</span>` : ''}
+        ${type === 'standby' ? `
+          <button class="btn btn-sm btn-primary"
+            onclick="confirmParticipantAction('${r.reply_id}','${r.vol_name}','${r.vol_id}','${c.case_id}')">✅ 確認</button>
+        ` : ''}
+        ${type === 'reject' ? `<span class="chip chip-red">❌ 婉拒</span>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function confirmParticipantAction(replyId, volName, volId, caseId) {
+  const result = await gasPost('confirmParticipant', {
+    reply_id: replyId, case_id: caseId, operator: state.user?.name || 'admin'
+  });
+  if (result) {
+    showToast(`✅ 已確認 ${volName} 參加`);
+    // 更新本地 state
+    const c = state.currentCase;
+    if (c?.replies) {
+      const r = c.replies.find(r => r.reply_id === replyId);
+      if (r) { r.reply_type = 'confirm'; r.vol_id = volId; }
+    }
+    document.getElementById('cd-confirmed').textContent = result.confirmed_count;
+    document.getElementById('cd-count').textContent =
+      (c.replies||[]).filter(r => r.reply_type === 'accept').length;
+    renderCdList('accept');
+  }
+}
+
+async function setStandbyAction(replyId, volName) {
+  const result = await gasPost('setStandby', { reply_id: replyId });
+  if (result) {
+    showToast(`⏳ ${volName} 已列為候補`);
+    const c = state.currentCase;
+    if (c?.replies) {
+      const r = c.replies.find(r => r.reply_id === replyId);
+      if (r) r.reply_type = 'standby';
+    }
+    document.getElementById('cd-count').textContent =
+      (c.replies||[]).filter(r => r.reply_type === 'accept').length;
+    renderCdList('accept');
+  }
+}
+
+async function sendCaseNotification() {
+  const c = state.currentCase;
+  if (!c) return;
+  const confirmed = (c.replies || []).filter(r => r.reply_type === 'confirm');
+  if (!confirmed.length) { showToast('⚠️ 尚無已確認成員，請先確認參加名單'); return; }
+  const msgTitle   = `【任務確認】${c.title}`;
+  const msgContent = `您已確認參加本次任務。\n日期：${c.case_date||'—'}\n地點：${c.location||'—'}\n請準時到場，謝謝您的參與！`;
+  let sent = 0;
+  for (const r of confirmed) {
+    if (!r.vol_id) continue;
+    await gasPost('addMessage', {
+      type: 'normal', title: msgTitle, content: msgContent,
+      target: r.vol_id, sender: state.user?.name || 'admin',
+    });
+    sent++;
+  }
+  showToast(`📩 已發送確認通知給 ${sent} 位志工`);
+  closeModal('modal-case-detail');
+}
+
+// ═══════════════════════════════════════
+// BROADCAST TARGET SELECTOR
+// ═══════════════════════════════════════
+function onBcTargetChange(val) {
+  document.getElementById('bc-group-wrap').classList.toggle('hidden', val !== 'group');
+  document.getElementById('bc-member-wrap').classList.toggle('hidden', val !== 'member');
+  if (val === 'group') {
+    const sel = document.getElementById('bc-group-id');
+    sel.innerHTML = state.groups.map(g =>
+      `<option value="${g.group_id}">${g.icon||'👥'} ${g.group_name}</option>`
+    ).join('');
+  }
+  if (val === 'member') {
+    document.getElementById('bc-member-id').value = '';
+    document.getElementById('bc-member-selected').textContent = '';
+    renderBcMemberList('');
+  }
+}
+
+function renderBcMemberList(search) {
+  const list = document.getElementById('bc-member-list');
+  if (!list) return;
+  const vols = search
+    ? state.vols.filter(v => (v.name||'').includes(search))
+    : state.vols.slice(0, 30);
+  list.innerHTML = vols.length
+    ? vols.map(v => `
+      <div style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;"
+           onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''"
+           onclick="selectBcMember('${v.vol_id}','${v.name}')">
+        <div class="av av-g" style="width:22px;height:22px;font-size:9px;flex-shrink:0;">${(v.name||'?').slice(0,1)}</div>
+        <span>${v.name}</span>
+        <span style="color:var(--text-muted);font-size:10px;margin-left:auto;">${v.phone||''}</span>
+      </div>`).join('')
+    : '<div style="padding:8px 12px;font-size:12px;color:var(--text-muted);">找不到成員</div>';
+}
+
+function selectBcMember(volId, name) {
+  document.getElementById('bc-member-id').value = volId;
+  document.getElementById('bc-member-selected').textContent = `已選擇：${name}`;
+  document.getElementById('bc-member-list').innerHTML = '';
+  document.getElementById('bc-member-search').value = name;
 }
 
 // ═══════════════════════════════════════
