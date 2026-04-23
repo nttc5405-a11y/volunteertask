@@ -296,12 +296,12 @@ tr:hover td{background:var(--surface);}
       <!-- 管理員登入 -->
       <div id="login-admin" class="hidden">
         <div class="fg">
-          <label class="fl">管理員帳號</label>
-          <input class="fi" id="admin-user" placeholder="admin" value="admin">
+          <label class="fl">手機號碼</label>
+          <input class="fi" id="admin-user" placeholder="0912-345-678">
         </div>
         <div class="fg">
           <label class="fl">密碼</label>
-          <input class="fi" type="password" id="admin-pass" placeholder="管理員密碼" value="admin">
+          <input class="fi" type="password" id="admin-pass" placeholder="管理員密碼">
         </div>
         <button class="btn btn-amber btn-full" onclick="doLogin('admin')" style="margin-top:8px;">
           登入管理端
@@ -968,20 +968,16 @@ function switchLoginTab(role, btn) {
 
 async function doLogin(role) {
   if (role === 'admin') {
-    const u = document.getElementById('admin-user').value;
-    const p = document.getElementById('admin-pass').value;
-    if (u === 'admin' && p === 'admin') {
-      state.user = { name: '管理員', vol_id: 'ADMIN', role: 'admin' };
-      state.role = 'admin';
-      enterApp('admin');
+    const phone = document.getElementById('admin-user').value.trim().replace(/-/g,'');
+    const p     = document.getElementById('admin-pass').value;
+    if (!phone || !p) { showToast('⚠️ 請輸入手機號碼與密碼'); return; }
+    const d = await gasPost('login', { phone, password: p });
+    if (d && d.role === 'admin') {
+      state.user = d; state.role = 'admin'; enterApp('admin');
+    } else if (d) {
+      showToast('❌ 此帳號沒有管理員權限');
     } else {
-      // Try GAS login
-      const d = await gasPost('login', { vol_id: u, password: p });
-      if (d && d.role === 'admin') {
-        state.user = d; state.role = 'admin'; enterApp('admin');
-      } else {
-        showToast('❌ 帳號或密碼錯誤');
-      }
+      showToast('❌ 手機號碼或密碼錯誤');
     }
   } else {
     const phone = document.getElementById('login-phone').value.trim().replace(/-/g,'');
