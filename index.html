@@ -253,8 +253,8 @@ tr:hover td{background:var(--surface);}
 </head>
 <body>
 
-<!-- ── CONFIG BANNER ─────────────────────────────────────────── -->
-<div class="config-bar" id="config-banner">
+<!-- ── CONFIG BANNER（已內建設定，預設隱藏）──────────────────── -->
+<div class="config-bar hidden" id="config-banner">
   ⚙️ 尚未設定 GAS 後端 — <a onclick="openModal('modal-config')">點此輸入 GAS_URL 與 TOKEN</a> 才能連接 Google Sheets
 </div>
 
@@ -272,6 +272,7 @@ tr:hover td{background:var(--surface);}
       <div class="login-tabs">
         <button class="login-tab active" onclick="switchLoginTab('member',this)">志工登入</button>
         <button class="login-tab" onclick="switchLoginTab('admin',this)">管理員登入</button>
+        <button class="login-tab" onclick="switchLoginTab('apply',this)">申請加入</button>
       </div>
 
       <!-- 志工登入 -->
@@ -305,6 +306,36 @@ tr:hover td{background:var(--surface);}
         <button class="btn btn-amber btn-full" onclick="doLogin('admin')" style="margin-top:8px;">
           登入管理端
         </button>
+      </div>
+
+      <!-- 申請加入 -->
+      <div id="login-apply" class="hidden">
+        <div class="fg">
+          <label class="fl">姓名</label>
+          <input class="fi" id="apply-name" placeholder="真實姓名">
+        </div>
+        <div class="fg">
+          <label class="fl">手機號碼</label>
+          <input class="fi" id="apply-phone" placeholder="0912345678">
+        </div>
+        <div class="fg">
+          <label class="fl">電子信箱（選填）</label>
+          <input class="fi" id="apply-email" placeholder="email">
+        </div>
+        <div class="fg">
+          <label class="fl">設定密碼</label>
+          <input class="fi" type="password" id="apply-pass" placeholder="請設定登入密碼">
+        </div>
+        <div class="fg">
+          <label class="fl">確認密碼</label>
+          <input class="fi" type="password" id="apply-pass2" placeholder="再次輸入密碼">
+        </div>
+        <button class="btn btn-primary btn-full" id="apply-btn" onclick="doApply()" style="margin-top:8px;">
+          送出申請
+        </button>
+        <p style="text-align:center;font-size:11px;color:var(--text-muted);margin-top:12px;">
+          申請後由管理員審核，通過後即可登入
+        </p>
       </div>
 
       <div style="margin-top:16px;text-align:center;">
@@ -534,6 +565,8 @@ tr:hover td{background:var(--surface);}
     <div class="s-item" onclick="goA('a-progress',this)"><span class="s-icon">📈</span><span class="s-text">進度管制</span></div>
     <div class="s-label">通訊</div>
     <div class="s-item" onclick="goA('a-broadcast',this)"><span class="s-icon">📢</span><span class="s-text">緊急廣播</span></div>
+    <div class="s-label">會員管理</div>
+    <div class="s-item" onclick="goA('a-applications',this)"><span class="s-icon">📝</span><span class="s-text">待審申請</span><span class="badge am" id="badge-apps">0</span></div>
   </div>
 
   <div class="main">
@@ -648,6 +681,26 @@ tr:hover td{background:var(--surface);}
       <div class="card">
         <div class="card-hd"><span class="card-title">廣播記錄</span></div>
         <div class="card-body" id="a-broadcast-log"><div class="loading-row">載入中...</div></div>
+      </div>
+    </div>
+
+    <!-- 待審申請 -->
+    <div id="a-applications" class="page">
+      <div class="page-hd">
+        <div><div class="page-title">待審申請</div><div class="page-sub">審核志工加入申請</div></div>
+        <button class="btn btn-sm btn-outline" onclick="loadApplications()">🔄 重新整理</button>
+      </div>
+      <div class="card">
+        <div class="card-hd">
+          <span class="card-title">申請列表</span>
+          <select class="fs" style="width:auto;padding:5px 8px;" onchange="filterApps(this.value)">
+            <option value="pending">待審核</option>
+            <option value="approved">已核准</option>
+            <option value="rejected">已拒絕</option>
+            <option value="">全部</option>
+          </select>
+        </div>
+        <div class="card-body tw" id="a-apps-table"><div class="loading-row"><div class="spinner"></div></div></div>
       </div>
     </div>
 
@@ -805,11 +858,17 @@ tr:hover td{background:var(--surface);}
 ══════════════════════════════════════════ -->
 <script>
 // ═══════════════════════════════════════
+// GAS 設定（已內建，無需手動輸入）
+// ═══════════════════════════════════════
+const GAS_URL   = 'https://script.google.com/macros/s/AKfycbxbiqJQry9KOf2CKAq5S_3ijYqf_mSqaukmskL1-WDXNbT2aDdLixyYoT-P736WGNSl/exec';
+const GAS_TOKEN = 'nttc5405';
+
+// ═══════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════
 const state = {
-  gasUrl: localStorage.getItem('gasUrl') || '',
-  token:  localStorage.getItem('gasToken') || '',
+  gasUrl: GAS_URL,
+  token:  GAS_TOKEN,
   user:   null,           // 登入的志工資料
   role:   '',             // 'member' | 'admin'
   mode:   'member',       // 目前顯示的面板
@@ -904,6 +963,7 @@ function switchLoginTab(role, btn) {
   btn.classList.add('active');
   document.getElementById('login-member').classList.toggle('hidden', role !== 'member');
   document.getElementById('login-admin').classList.toggle('hidden', role !== 'admin');
+  document.getElementById('login-apply').classList.toggle('hidden', role !== 'apply');
 }
 
 async function doLogin(role) {
@@ -930,18 +990,49 @@ async function doLogin(role) {
     if (state.gasUrl) {
       const d = await gasPost('login', { phone, password: pass });
       if (d) { state.user = d; state.role = 'member'; enterApp('member'); return; }
+      showToast('❌ 帳號或密碼錯誤，或帳號尚未審核通過');
+      return;
     }
-    // Demo fallback
-    state.user = { name: phone.slice(-4) ? '陳志明' : '志工', vol_id: 'V-DEMO',
-                   total_hours: 42, level: 'silver', phone };
+    // Demo fallback（只在未設定 GAS URL 時使用）
+    state.user = { name: '示範志工', vol_id: 'V-DEMO', total_hours: 42, level: 'silver', phone };
     state.role = 'member'; enterApp('member');
   }
 }
 
 function demoLogin() {
-  state.user = { name: '陳志明（展示）', vol_id: 'V-DEMO', total_hours: 42, level: 'silver', role: 'volunteer' };
+  state.user = { name: '示範志工（展示）', vol_id: 'V-DEMO', total_hours: 42, level: 'silver', role: 'volunteer' };
   state.role = 'member';
   enterApp('member');
+}
+
+// ═══════════════════════════════════════
+// 申請加入
+// ═══════════════════════════════════════
+async function doApply() {
+  const name  = document.getElementById('apply-name').value.trim();
+  const phone = document.getElementById('apply-phone').value.trim().replace(/-/g,'');
+  const email = document.getElementById('apply-email').value.trim();
+  const pass  = document.getElementById('apply-pass').value;
+  const pass2 = document.getElementById('apply-pass2').value;
+  if (!name)        { showToast('⚠️ 請填寫姓名'); return; }
+  if (!phone)       { showToast('⚠️ 請填寫手機號碼'); return; }
+  if (!pass)        { showToast('⚠️ 請設定密碼'); return; }
+  if (pass !== pass2) { showToast('⚠️ 兩次密碼不一致'); return; }
+  const btn = document.getElementById('apply-btn');
+  btn.textContent = '送出中...'; btn.disabled = true;
+  const result = await gasPost('applyVolunteer', { name, phone, email, password: pass });
+  btn.textContent = '送出申請'; btn.disabled = false;
+  if (result) {
+    showToast('✅ 申請已送出！請等候管理員審核通知');
+    ['apply-name','apply-phone','apply-email','apply-pass','apply-pass2'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    // 切回登入頁
+    const firstTab = document.querySelector('.login-tab');
+    if (firstTab) switchLoginTab('member', firstTab);
+  } else {
+    showToast('❌ 申請送出失敗，請稍後再試');
+  }
 }
 
 function enterApp(role) {
@@ -1007,6 +1098,7 @@ function goA(pageId, el) {
   if (pageId === 'a-progress') renderProgress();
   if (pageId === 'a-broadcast') loadMessages();
   if (pageId === 'a-dash') loadAdminDash();
+  if (pageId === 'a-applications') loadApplications();
 }
 
 // ═══════════════════════════════════════
@@ -1027,7 +1119,14 @@ async function loadAll() {
   state.messages = msgs    || getDemoMsgs();
 
   renderMemberHome();
-  if (state.role === 'admin') loadAdminDash(stats);
+  if (state.role === 'admin') {
+    loadAdminDash(stats);
+    // 更新待審申請 badge
+    gasGet('listApplications', { status: 'pending' }).then(apps => {
+      const ba = document.getElementById('badge-apps');
+      if (ba && apps) ba.textContent = apps.length || '';
+    });
+  }
   updateBadges();
 }
 
@@ -1467,6 +1566,80 @@ async function submitAddGroup() {
 }
 
 // ═══════════════════════════════════════
+// ADMIN APPLICATIONS
+// ═══════════════════════════════════════
+let appsFilter = 'pending';
+
+async function loadApplications() {
+  const apps = await gasGet('listApplications', appsFilter ? { status: appsFilter } : {}) || [];
+  renderApplications(apps);
+  // 更新 badge（永遠顯示待審數量）
+  if (appsFilter !== 'pending') {
+    gasGet('listApplications', { status: 'pending' }).then(pa => {
+      const ba = document.getElementById('badge-apps');
+      if (ba) ba.textContent = pa && pa.length ? pa.length : '';
+    });
+  } else {
+    const ba = document.getElementById('badge-apps');
+    if (ba) ba.textContent = apps.length || '';
+  }
+}
+
+function renderApplications(apps) {
+  const el = document.getElementById('a-apps-table');
+  if (!el) return;
+  if (!apps.length) {
+    el.innerHTML = '<div class="loading-row">目前無' + (appsFilter === 'pending' ? '待審' : '') + '申請</div>';
+    return;
+  }
+  const statusLabel   = { pending: '待審核', approved: '已核准', rejected: '已拒絕' };
+  const statusChipMap = { pending: 'chip-amber', approved: 'chip-green', rejected: 'chip-red' };
+  el.innerHTML = `<table>
+    <thead><tr><th>姓名</th><th>手機</th><th>信箱</th><th>申請日期</th><th>狀態</th><th>操作</th></tr></thead>
+    <tbody>${apps.map(a => `<tr>
+      <td style="font-weight:700;">${a.name||'—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:11px;">${a.phone||'—'}</td>
+      <td style="font-size:11px;">${a.email||'—'}</td>
+      <td>${fmtDate(a.apply_date)}</td>
+      <td><span class="chip ${statusChipMap[a.status]||'chip-gray'}">${statusLabel[a.status]||a.status}</span></td>
+      <td><div style="display:flex;gap:4px;">${a.status === 'pending'
+        ? `<button class="btn btn-sm btn-primary" onclick="approveApp('${a.app_id}','${a.name}')">✅ 核准</button>
+           <button class="btn btn-sm btn-outline" onclick="rejectApp('${a.app_id}','${a.name}')">❌ 拒絕</button>`
+        : '<span style="color:var(--text-muted);font-size:11px;">—</span>'
+      }</div></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function filterApps(status) {
+  appsFilter = status;
+  const apps = await gasGet('listApplications', status ? { status } : {}) || [];
+  renderApplications(apps);
+}
+
+async function approveApp(app_id, name) {
+  if (!confirm(`確定要核准「${name}」的申請嗎？\n核准後將自動建立志工帳號。`)) return;
+  const result = await gasPost('approveApplication', { app_id, operator: state.user?.name || 'admin' });
+  if (result) {
+    showToast(`✅ ${name} 已核准，志工編號：${result.vol_id}`);
+    await loadApplications();
+    await loadAll();
+  } else {
+    showToast('❌ 操作失敗，請重試');
+  }
+}
+
+async function rejectApp(app_id, name) {
+  if (!confirm(`確定要拒絕「${name}」的申請嗎？`)) return;
+  const result = await gasPost('rejectApplication', { app_id, operator: state.user?.name || 'admin', reason: '管理員拒絕' });
+  if (result) {
+    showToast(`🚫 已拒絕 ${name} 的申請`);
+    await loadApplications();
+  } else {
+    showToast('❌ 操作失敗，請重試');
+  }
+}
+
+// ═══════════════════════════════════════
 // BADGES
 // ═══════════════════════════════════════
 function updateBadges() {
@@ -1582,12 +1755,9 @@ function getDemoStats() {
 // ═══════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════
-// 如果有儲存的設定，預填欄位
-if (state.gasUrl) {
-  document.getElementById('cfg-url').value = state.gasUrl;
-  document.getElementById('config-banner').classList.add('hidden');
-}
-if (state.token) document.getElementById('cfg-token').value = state.token;
+// 預填設定欄位（供進階調整用）
+document.getElementById('cfg-url').value   = state.gasUrl;
+document.getElementById('cfg-token').value = state.token;
 </script>
 </body>
 </html>
