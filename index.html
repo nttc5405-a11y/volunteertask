@@ -105,6 +105,7 @@ body{font-family:'Noto Sans TC',sans-serif;background:var(--surface);color:var(-
 /* ── BUTTONS ───────────────────────────── */
 .btn{display:inline-flex;align-items:center;gap:5px;padding:7px 16px;border-radius:var(--radius);font-family:'Noto Sans TC',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s;border:none;}
 .btn-primary{background:var(--sage);color:#fff;}.btn-primary:hover{background:var(--ink);}
+.btn-sage{background:var(--sage-light);color:#fff;}.btn-sage:hover{background:var(--sage);}
 .btn-amber{background:var(--amber);color:#fff;}.btn-amber:hover{background:#c0622a;}
 .btn-crimson{background:var(--crimson);color:#fff;}
 .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text-secondary);}
@@ -597,7 +598,7 @@ tr:hover td{background:var(--surface);}
             <div class="card-hd"><span class="card-title">快速操作</span></div>
             <div class="card-body" style="display:flex;flex-direction:column;gap:7px;">
               <button class="btn btn-crimson btn-full" onclick="openModal('modal-emergency')">🚨 發布緊急訊息</button>
-              <button class="btn btn-amber btn-full" onclick="openModal('modal-new-case')">📋 新增案件</button>
+              <button class="btn btn-amber btn-full" onclick="openNewCaseModal()">📋 新增案件</button>
               <button class="btn btn-outline btn-full" onclick="openModal('modal-add-vol')">➕ 新增志工</button>
             </div>
           </div>
@@ -641,7 +642,7 @@ tr:hover td{background:var(--surface);}
     <div id="a-dispatch" class="page">
       <div class="page-hd">
         <div><div class="page-title">派案管理</div><div class="page-sub">指定志工或群組執行任務</div></div>
-        <button class="btn btn-primary" onclick="openModal('modal-new-case')">➕ 建立案件</button>
+        <button class="btn btn-primary" onclick="openNewCaseModal()">➕ 建立案件</button>
       </div>
       <div class="card">
         <div class="card-body tw" id="a-cases-table"><div class="loading-row"><div class="spinner"></div></div></div>
@@ -807,6 +808,13 @@ tr:hover td{background:var(--surface);}
         </div>
         <div class="fg full"><label class="fl">任務說明</label><textarea class="ft" id="nc-desc" placeholder="詳細說明..."></textarea></div>
       </div>
+      <div style="margin-top:14px;">
+        <label class="fl">直接指派志工（選填）</label>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">只顯示待命中的志工，勾選後建立案件時自動確認並發通知</div>
+        <div id="nc-vol-list" style="max-height:200px;overflow-y:auto;border:1.5px solid var(--border);border-radius:8px;padding:4px;">
+          <div style="padding:10px;text-align:center;font-size:12px;color:var(--text-muted);">載入中...</div>
+        </div>
+      </div>
     </div>
     <div class="m-foot">
       <button class="btn btn-outline" onclick="closeModal('modal-new-case')">取消</button>
@@ -858,6 +866,72 @@ tr:hover td{background:var(--surface);}
     <div class="m-foot">
       <button class="btn btn-outline" onclick="closeModal('modal-add-group')">取消</button>
       <button class="btn btn-primary" onclick="submitAddGroup()">建立群組</button>
+    </div>
+  </div>
+</div>
+
+<!-- 回報任務完成（志工端）-->
+<div class="overlay" id="modal-report-complete">
+  <div class="modal" style="max-width:420px;">
+    <div class="m-hd">
+      <span class="m-title">✅ 回報任務完成</span>
+      <button class="m-close" onclick="closeModal('modal-report-complete')">✕</button>
+    </div>
+    <div class="m-body">
+      <div style="background:var(--sage-pale);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--sage);font-weight:600;" id="rc-case-title"></div>
+      <div class="fg">
+        <label class="fl">完成備註（選填）</label>
+        <textarea class="ft" id="rc-notes" placeholder="任務執行狀況、特殊情況說明..."></textarea>
+      </div>
+      <p style="font-size:11px;color:var(--text-muted);">送出後管理員將進行最終結案確認。</p>
+      <input type="hidden" id="rc-case-id">
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-outline" onclick="closeModal('modal-report-complete')">取消</button>
+      <button class="btn btn-primary" onclick="submitCompletion()">送出回報</button>
+    </div>
+  </div>
+</div>
+
+<!-- 管理端結案摘要 modal -->
+<div class="overlay" id="modal-close-summary">
+  <div class="modal" style="max-width:460px;">
+    <div class="m-hd">
+      <span class="m-title">📋 結案確認</span>
+      <button class="m-close" onclick="closeModal('modal-close-summary')">✕</button>
+    </div>
+    <div class="m-body">
+      <div style="background:var(--sage-pale);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--sage);font-weight:600;" id="cs-case-title"></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">結案後以下志工的服務時數將以實際報到記錄為準：</div>
+      <div id="cs-direct-notice" style="display:none;background:var(--amber-pale);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--amber);font-weight:600;">⚠️ 志工尚未回報完成，您正在直接強制結案。</div>
+      <div id="cs-summary"></div>
+      <div style="margin-top:14px;padding:10px 14px;background:var(--surface);border-radius:8px;font-size:13px;font-weight:700;" id="cs-total"></div>
+      <input type="hidden" id="cs-case-id">
+      <input type="hidden" id="cs-direct">
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-outline" onclick="closeModal('modal-close-summary')">取消</button>
+      <button class="btn btn-primary" onclick="confirmCloseCase()">✅ 確認結案</button>
+    </div>
+  </div>
+</div>
+
+<!-- 群組成員管理 -->
+<div class="overlay" id="modal-group-members">
+  <div class="modal" style="max-width:540px;">
+    <div class="m-hd">
+      <div>
+        <div class="m-title" id="gm-title">群組成員</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="gm-sub"></div>
+      </div>
+      <button class="m-close" onclick="closeModal('modal-group-members')">✕</button>
+    </div>
+    <div class="m-body">
+      <div class="tabs">
+        <button class="tab active" onclick="gmTab('current',this)">目前成員</button>
+        <button class="tab" onclick="gmTab('add',this)">新增成員</button>
+      </div>
+      <div id="gm-list" style="margin-top:8px;max-height:400px;overflow-y:auto;"></div>
     </div>
   </div>
 </div>
@@ -1144,18 +1218,22 @@ function goA(pageId, el) {
 // LOAD ALL
 // ═══════════════════════════════════════
 async function loadAll() {
-  const [vols, cases, groups, msgs, stats] = await Promise.all([
+  const [vols, cases, groups, msgs, stats, replies, checkins] = await Promise.all([
     gasGet('getVolunteers'),
     gasGet('getCases'),
     gasGet('getGroups'),
     gasGet('getMessages'),
     gasGet('getStats'),
+    gasGet('getReplies'),
+    gasGet('getCheckin'),
   ]);
 
   state.vols     = vols    || getDemoVols();
   state.cases    = cases   || getDemoCases();
   state.groups   = groups  || getDemoGroups();
   state.messages = msgs    || getDemoMsgs();
+  state.replies  = replies || [];
+  state.checkins = checkins || [];
 
   renderMemberHome();
   if (state.role === 'admin') {
@@ -1213,6 +1291,10 @@ function renderMemberHome() {
 
 function caseCardHtml(c) {
   const ub = c.priority === 'urgent' ? 'ub-h' : c.priority === 'high' ? 'ub-m' : 'ub-l';
+  const isExecuting = c.status === '執行中';
+  const reportBtn = isExecuting
+    ? `<button class="btn btn-sm btn-sage" onclick="event.stopPropagation();openReportComplete('${c.case_id}','${(c.title||'').replace(/'/g,"\\'")}')">✅ 回報完成</button>`
+    : '';
   return `<div class="cc" onclick="openCaseReply('${c.case_id}','${c.title}')">
     <div class="urgency-bar ${ub}"></div>
     <div class="cc-title">${c.title}</div>
@@ -1220,6 +1302,7 @@ function caseCardHtml(c) {
     <div class="cc-footer">
       <span class="chip ${statusChip(c.status)}">${c.status}</span>
       <div style="display:flex;gap:5px;">
+        ${reportBtn}
         <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openCaseReply('${c.case_id}','${c.title}')">回覆</button>
       </div>
     </div>
@@ -1238,7 +1321,7 @@ function notifHtml(m) {
 }
 
 function statusChip(s) {
-  const map = { '待派案':'chip-amber', '執行中':'chip-green', '人員確認中':'chip-blue', '已結案':'chip-gray' };
+  const map = { '待派案':'chip-amber', '執行中':'chip-green', '人員確認中':'chip-blue', '待結案確認':'chip-red', '已結案':'chip-gray' };
   return map[s] || 'chip-gray';
 }
 
@@ -1280,6 +1363,97 @@ async function submitReply() {
   closeModal('modal-reply');
   showToast(result ? '✅ 已送出回覆' : '✅ 回覆已記錄（示範模式）');
   await loadAll();
+}
+
+// ═══════════════════════════════════════
+// TASK COMPLETION（志工回報 ＆ 管理員結案）
+// ═══════════════════════════════════════
+
+function openReportComplete(caseId, title) {
+  document.getElementById('rc-case-title').textContent = title;
+  document.getElementById('rc-case-id').value = caseId;
+  document.getElementById('rc-notes').value = '';
+  openModal('modal-report-complete');
+}
+
+async function submitCompletion() {
+  const caseId = document.getElementById('rc-case-id').value;
+  const notes  = document.getElementById('rc-notes').value;
+  const u = state.user || {};
+  const result = await gasPost('reportCompletion', {
+    case_id: caseId,
+    vol_id:  u.vol_id,
+    vol_name: u.name,
+    notes,
+  });
+  closeModal('modal-report-complete');
+  if (result) {
+    showToast('✅ 已回報完成，等待管理員確認結案');
+    await loadAll();
+  } else {
+    showToast('✅ 回報已記錄（示範模式）');
+  }
+}
+
+async function openCloseSummary(caseId, title, direct) {
+  // Fetch current checkin / reply data to build hours summary
+  const c = state.cases.find(x => x.case_id === caseId);
+  if (!c) return;
+
+  // Show loading state
+  document.getElementById('cs-case-id').value = caseId;
+  document.getElementById('cs-direct').value  = direct ? '1' : '0';
+
+  // Build the summary table from local state (replies + checkins)
+  const confirmed = (state.replies || []).filter(r => r.case_id === caseId && r.reply_type === 'confirm');
+  const checkins  = (state.checkins || []).filter(r => r.case_id === caseId && r.checkout_time);
+
+  let rows = '';
+  let totalHrs = 0;
+
+  if (confirmed.length) {
+    confirmed.forEach(reply => {
+      const recs = checkins.filter(r => r.vol_id === reply.vol_id);
+      const hrs  = recs.reduce((s, r) => s + (parseFloat(r.hours) || 0), 0);
+      totalHrs  += hrs;
+      const hrsDisplay = hrs > 0 ? hrs.toFixed(2) + ' 小時' : '—（未簽退或無記錄）';
+      rows += `<tr><td>${reply.vol_name || reply.vol_id}</td><td style="font-family:'DM Mono',monospace;text-align:right;">${hrsDisplay}</td></tr>`;
+    });
+  } else {
+    rows = '<tr><td colspan="2" style="color:var(--text-muted);text-align:center;">尚無確認參與的志工</td></tr>';
+  }
+
+  document.getElementById('cs-summary').innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="border-bottom:1px solid var(--border);">
+        <th style="padding:6px 0;text-align:left;">志工姓名</th>
+        <th style="padding:6px 0;text-align:right;">服務時數</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  document.getElementById('cs-total').textContent = totalHrs > 0 ? `合計 ${totalHrs.toFixed(2)} 小時` : '尚未完整記錄';
+  document.getElementById('cs-case-title').textContent = title;
+  document.getElementById('cs-direct-notice').style.display = direct ? '' : 'none';
+
+  openModal('modal-close-summary');
+}
+
+async function confirmCloseCase() {
+  const caseId = document.getElementById('cs-case-id').value;
+  const result = await gasPost('closeCase', {
+    case_id: caseId,
+    operator: state.user?.name || 'admin',
+  });
+  closeModal('modal-close-summary');
+  if (result) {
+    const summary = result.summary || [];
+    const vol_count = result.vol_count || 0;
+    const total = result.total_hours || 0;
+    showToast(`✅ 案件已結案｜${vol_count} 名志工・共 ${total} 小時`);
+    await loadAll();
+  } else {
+    showToast('✅ 案件已結案（示範模式）');
+  }
 }
 
 // ═══════════════════════════════════════
@@ -1421,7 +1595,7 @@ async function loadAdminDash(stats) {
   const pendEl = document.getElementById('a-pending-cases');
   const pending = state.cases.filter(c => c.status === '待派案').slice(0, 3);
   pendEl.innerHTML = pending.length
-    ? pending.map(c => `<div class="cc"><div class="urgency-bar ub-h"></div><div class="cc-title">${c.title}</div><div class="cc-meta">📍 ${c.location||'—'} ・ 需${c.required_count||0}人</div><div class="cc-footer"><span class="chip chip-amber">${c.status}</span><button class="btn btn-sm btn-primary" onclick="openModal('modal-new-case')">派案</button></div></div>`).join('')
+    ? pending.map(c => `<div class="cc"><div class="urgency-bar ub-h"></div><div class="cc-title">${c.title}</div><div class="cc-meta">📍 ${c.location||'—'} ・ 需${c.required_count||0}人</div><div class="cc-footer"><span class="chip chip-amber">${c.status}</span><button class="btn btn-sm btn-primary" onclick="openNewCaseModal()">派案</button></div></div>`).join('')
     : '<div style="color:var(--text-muted);font-size:13px;">目前無待派案件</div>';
 
   const bc = document.getElementById('badge-pending');
@@ -1454,6 +1628,89 @@ function filterVols() { renderAdminVols(); }
 function filterVolsByStatus(s) { renderAdminVols(s); }
 
 // ═══════════════════════════════════════
+// GROUP MEMBER MANAGEMENT
+// ═══════════════════════════════════════
+function openGroupMembers(groupId, groupName) {
+  state.currentGroupId = groupId;
+  const g = state.groups.find(g => g.group_id === groupId);
+  document.getElementById('gm-title').textContent = `${g?.icon||'👥'} ${groupName}`;
+  const count = state.vols.filter(v => v.group_id === groupId).length;
+  document.getElementById('gm-sub').textContent = `${count} 位成員`;
+  document.querySelectorAll('#modal-group-members .tab').forEach((t,i) => t.classList.toggle('active', i===0));
+  renderGmList('current');
+  openModal('modal-group-members');
+}
+
+function gmTab(type, btn) {
+  document.querySelectorAll('#modal-group-members .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderGmList(type);
+}
+
+function renderGmList(type) {
+  const el = document.getElementById('gm-list');
+  const groupId = state.currentGroupId;
+  if (type === 'current') {
+    const members = state.vols.filter(v => String(v.group_id) === String(groupId));
+    el.innerHTML = members.length
+      ? members.map(v => `
+        <div class="vr">
+          <div class="av av-g">${(v.name||'?').slice(0,1)}</div>
+          <div class="vr-info">
+            <div class="vr-name">${v.name}</div>
+            <div class="vr-meta"><span class="chip ${v.status==='上工中'?'chip-green':v.status==='待命'?'chip-blue':'chip-gray'}">${v.status||'—'}</span> ・ ${v.total_hours||0}h</div>
+          </div>
+          <button class="btn btn-sm btn-outline" style="color:var(--crimson);border-color:var(--crimson);"
+            onclick="removeVolFromGroup('${v.vol_id}','${v.name}')">移除</button>
+        </div>`).join('')
+      : '<div class="loading-row">此群組目前無成員</div>';
+  } else {
+    const others = state.vols.filter(v => String(v.group_id) !== String(groupId));
+    el.innerHTML = others.length
+      ? others.map(v => `
+        <div class="vr">
+          <div class="av av-g">${(v.name||'?').slice(0,1)}</div>
+          <div class="vr-info">
+            <div class="vr-name">${v.name}</div>
+            <div class="vr-meta">${v.group_id ? `目前在其他群組` : '未分組'} ・ ${v.status||'—'}</div>
+          </div>
+          <button class="btn btn-sm btn-primary"
+            onclick="assignVolToGroup('${v.vol_id}','${v.name}')">加入</button>
+        </div>`).join('')
+      : '<div class="loading-row">所有志工都已在此群組</div>';
+  }
+}
+
+async function assignVolToGroup(volId, volName) {
+  const result = await gasPost('assignToGroup', { vol_id: volId, group_id: state.currentGroupId });
+  if (result) {
+    showToast(`✅ ${volName} 已加入群組`);
+    const vol = state.vols.find(v => v.vol_id === volId);
+    if (vol) vol.group_id = state.currentGroupId;
+    const g = state.groups.find(g => g.group_id === state.currentGroupId);
+    if (g) g.member_count = result.member_count;
+    document.getElementById('gm-sub').textContent =
+      `${state.vols.filter(v => v.group_id === state.currentGroupId).length} 位成員`;
+    renderGmList('add');
+  }
+}
+
+async function removeVolFromGroup(volId, volName) {
+  if (!confirm(`確定要將「${volName}」從群組移除嗎？`)) return;
+  const result = await gasPost('removeFromGroup', { vol_id: volId, group_id: state.currentGroupId });
+  if (result) {
+    showToast(`🚫 ${volName} 已從群組移除`);
+    const vol = state.vols.find(v => v.vol_id === volId);
+    if (vol) vol.group_id = '';
+    const g = state.groups.find(g => g.group_id === state.currentGroupId);
+    if (g) g.member_count = Math.max(0, (g.member_count||1) - 1);
+    document.getElementById('gm-sub').textContent =
+      `${state.vols.filter(v => v.group_id === state.currentGroupId).length} 位成員`;
+    renderGmList('current');
+  }
+}
+
+// ═══════════════════════════════════════
 // ADMIN GROUPS
 // ═══════════════════════════════════════
 function renderAdminGroups() {
@@ -1466,7 +1723,7 @@ function renderAdminGroups() {
       <div style="font-size:11px;color:var(--text-muted);">負責人：${g.leader||'—'} ・ ${g.member_count||0}名成員</div>
     </div>
     <div style="display:flex;gap:5px;">
-      <button class="btn btn-sm btn-outline">成員</button>
+      <button class="btn btn-sm btn-outline" onclick="openGroupMembers('${g.group_id}','${g.group_name}')">成員</button>
       <button class="btn btn-sm btn-outline">編輯</button>
     </div>
   </div>`).join('') +
@@ -1481,16 +1738,25 @@ function renderAdminGroups() {
 function renderAdminCases() {
   document.getElementById('a-cases-table').innerHTML = `<table>
     <thead><tr><th>案件名稱</th><th>地點</th><th>日期</th><th>人數</th><th>狀態</th><th>操作</th></tr></thead>
-    <tbody>${state.cases.map(c => `<tr>
-      <td style="font-weight:600;">${c.title||'—'}</td>
-      <td>${c.location||'—'}</td><td>${c.case_date||'—'}</td>
-      <td><span style="font-family:'DM Mono',monospace;">${c.accepted_count||0}/${c.required_count||0}</span></td>
-      <td><span class="chip ${statusChip(c.status)}">${c.status||'—'}</span></td>
-      <td><div style="display:flex;gap:4px;">
-        <button class="btn btn-sm btn-primary" onclick="openModal('modal-new-case')">編輯</button>
-        <button class="btn btn-sm btn-outline" onclick="openCaseDetail('${c.case_id}')">詳情</button>
-      </div></td>
-    </tr>`).join('')}</tbody></table>`;
+    <tbody>${state.cases.map(c => {
+      const title = (c.title||'—').replace(/'/g,"\\'");
+      let closeBtn = '';
+      if (c.status === '待結案確認') {
+        closeBtn = `<button class="btn btn-sm btn-sage" onclick="openCloseSummary('${c.case_id}','${title}',false)">✅ 確認結案</button>`;
+      } else if (c.status === '執行中') {
+        closeBtn = `<button class="btn btn-sm btn-outline" onclick="openCloseSummary('${c.case_id}','${title}',true)">🔒 直接結案</button>`;
+      }
+      return `<tr>
+        <td style="font-weight:600;">${c.title||'—'}</td>
+        <td>${c.location||'—'}</td><td>${c.case_date||'—'}</td>
+        <td><span style="font-family:'DM Mono',monospace;">${c.accepted_count||0}/${c.required_count||0}</span></td>
+        <td><span class="chip ${statusChip(c.status)}">${c.status||'—'}</span></td>
+        <td><div style="display:flex;gap:4px;flex-wrap:wrap;">
+          ${closeBtn}
+          <button class="btn btn-sm btn-outline" onclick="openCaseDetail('${c.case_id}')">詳情</button>
+        </div></td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
 }
 
 // ═══════════════════════════════════════
@@ -1565,24 +1831,61 @@ async function sendEmergency() {
 // ═══════════════════════════════════════
 // SUBMIT FORMS
 // ═══════════════════════════════════════
+function openNewCaseModal() {
+  // 載入待命志工清單
+  const vols = state.vols.filter(v => v.status === '待命');
+  const el = document.getElementById('nc-vol-list');
+  if (el) {
+    el.innerHTML = vols.length
+      ? vols.map(v => `
+        <label style="display:flex;align-items:center;gap:8px;padding:7px 8px;cursor:pointer;border-radius:6px;font-size:12px;user-select:none;"
+               onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background=''">
+          <input type="checkbox" value="${v.vol_id}" style="width:14px;height:14px;accent-color:var(--sage);flex-shrink:0;">
+          <div class="av av-g" style="width:22px;height:22px;font-size:9px;flex-shrink:0;">${(v.name||'?').slice(0,1)}</div>
+          <span style="font-weight:600;">${v.name}</span>
+          ${v.group_id ? `<span class="chip chip-blue" style="font-size:10px;">${v.group_id}</span>` : ''}
+          <span style="color:var(--text-muted);font-size:10px;margin-left:auto;">${v.total_hours||0}h</span>
+        </label>`).join('')
+      : '<div style="padding:10px;text-align:center;font-size:12px;color:var(--text-muted);">目前無待命志工</div>';
+  }
+  openModal('modal-new-case');
+}
+
 async function submitNewCase() {
   const data = {
-    title: document.getElementById('nc-title').value,
-    location: document.getElementById('nc-location').value,
-    case_date: document.getElementById('nc-date').value,
+    title:          document.getElementById('nc-title').value,
+    location:       document.getElementById('nc-location').value,
+    case_date:      document.getElementById('nc-date').value,
     required_count: document.getElementById('nc-count').value,
-    priority: document.getElementById('nc-priority').value,
-    description: document.getElementById('nc-desc').value,
-    creator: state.user?.name || 'admin',
+    priority:       document.getElementById('nc-priority').value,
+    description:    document.getElementById('nc-desc').value,
+    creator:        state.user?.name || 'admin',
   };
   if (!data.title) { showToast('⚠️ 請填寫案件名稱'); return; }
+
   const result = await gasPost('addCase', data);
   closeModal('modal-new-case');
-  showToast(result ? '📋 案件已建立並寫入 Sheets' : '📋 案件已建立（示範模式）');
-  // 加入本地 state
-  state.cases.unshift({ ...data, case_id: 'C-TEMP', status: '待派案', accepted_count: 0 });
-  renderAdminCases();
-  updateBadges();
+
+  // 取得勾選的志工
+  const checked = [...document.querySelectorAll('#nc-vol-list input[type="checkbox"]:checked')];
+  if (result?.case_id && checked.length > 0) {
+    const volIds = checked.map(cb => cb.value);
+    await gasPost('directAssign', {
+      case_id:       result.case_id,
+      case_title:    data.title,
+      case_date:     data.case_date,
+      case_location: data.location,
+      vol_ids:       volIds,
+      operator:      state.user?.name || 'admin',
+    });
+    showToast(`📋 案件已建立，已指派並通知 ${volIds.length} 位志工`);
+    await loadAll();
+  } else {
+    showToast(result ? '📋 案件已建立並寫入 Sheets' : '📋 案件已建立（示範模式）');
+    state.cases.unshift({ ...data, case_id: result?.case_id || 'C-TEMP', status: '待派案', accepted_count: 0 });
+    renderAdminCases();
+    updateBadges();
+  }
 }
 
 async function submitAddVol() {
