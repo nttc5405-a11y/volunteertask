@@ -759,11 +759,24 @@ tr:hover td{background:var(--surface);}
     <div class="m-hd"><span class="m-title" id="reply-modal-title">回覆案件</span><button class="m-close" onclick="closeModal('modal-reply')">✕</button></div>
     <div class="m-body">
       <div class="fg"><label class="fl">回覆類型</label>
-        <div style="display:flex;gap:7px;">
-          <button class="btn btn-primary btn-sm" id="rtype-accept" onclick="setRType('accept',this)">✅ 接受</button>
-          <button class="btn btn-outline btn-sm" id="rtype-reject" onclick="setRType('reject',this)">❌ 婉拒</button>
-          <button class="btn btn-outline btn-sm" id="rtype-ask" onclick="setRType('ask',this)">❓ 詢問</button>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" id="rtype-accept"   onclick="setRType('accept',this)">✅ 接受任務</button>
+          <button class="btn btn-outline btn-sm" id="rtype-progress" onclick="setRType('progress',this)">📊 進度回報</button>
+          <button class="btn btn-outline btn-sm" id="rtype-ask"      onclick="setRType('ask',this)">❓ 詢問</button>
+          <button class="btn btn-outline btn-sm" id="rtype-reject"   onclick="setRType('reject',this)">❌ 婉拒</button>
         </div>
+      </div>
+      <!-- 接受任務提示 -->
+      <div id="reply-hint-accept" style="display:none;background:var(--sage-pale);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--sage);font-weight:600;">
+        🟡 接受後您的狀態將自動切換為「忙碌中」，完成任務後請再自行改回。
+      </div>
+      <!-- 進度回報提示 -->
+      <div id="reply-hint-progress" style="display:none;background:var(--sky-pale);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--sky);font-weight:600;">
+        📋 請填寫目前執行狀況，管理員將可在案件詳情中看到您的進度更新。
+      </div>
+      <!-- 婉拒提示 -->
+      <div id="reply-hint-reject" style="display:none;background:var(--crimson-pale);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--crimson);font-weight:600;">
+        ❗ 婉拒後您的狀態將自動切換為「待命」，管理員將收到通知。
       </div>
       <div class="fg"><label class="fl">回覆內容</label>
         <textarea class="ft" id="reply-content" placeholder="輸入您的回覆訊息..."></textarea>
@@ -960,6 +973,7 @@ tr:hover td{background:var(--surface);}
         <button class="tab active" onclick="cdTab('accept',this)">✋ 報名中</button>
         <button class="tab" onclick="cdTab('confirm',this)">✅ 已確認</button>
         <button class="tab" onclick="cdTab('standby',this)">⏳ 候補</button>
+        <button class="tab" onclick="cdTab('progress',this)">📊 進度回報</button>
         <button class="tab" onclick="cdTab('reject',this)">❌ 婉拒</button>
       </div>
       <div id="cd-list" style="margin-top:4px;"></div>
@@ -1353,15 +1367,38 @@ function openCaseReply(caseId, title) {
 }
 
 async function submitReply() {
-  const caseId = document.getElementById('reply-case-id').value;
+  const caseId  = document.getElementById('reply-case-id').value;
   const content = document.getElementById('reply-content').value;
   const u = state.user || {};
+  const rtype = state.replyType;
+
   const result = await gasPost('addReply', {
     case_id: caseId, vol_id: u.vol_id, vol_name: u.name,
-    reply_type: state.replyType, content,
+    reply_type: rtype, content,
   });
+
+  // ── 自動同步志工狀態 ──────────────────────
+  if (rtype === 'accept') {
+    // 接受任務 → 忙碌中
+    await gasPost('updateStatus', { vol_id: u.vol_id, status: '忙碌' });
+    if (state.user) state.user.status = '忙碌';
+  } else if (rtype === 'reject') {
+    // 婉拒任務 → 回到待命（只有當前是忙碌才切換，避免覆蓋休息狀態）
+    if (state.user && state.user.status === '忙碌') {
+      await gasPost('updateStatus', { vol_id: u.vol_id, status: '待命' });
+      state.user.status = '待命';
+    }
+  }
+
   closeModal('modal-reply');
-  showToast(result ? '✅ 已送出回覆' : '✅ 回覆已記錄（示範模式）');
+
+  const toastMap = {
+    accept:   '✅ 已接受任務，狀態切換為忙碌中',
+    reject:   '❌ 已婉拒任務',
+    progress: '📊 進度已回報，管理員將收到通知',
+    ask:      '❓ 已送出詢問',
+  };
+  showToast(result ? (toastMap[rtype] || '✅ 已送出回覆') : '✅ 回覆已記錄（示範模式）');
   await loadAll();
 }
 
@@ -1937,6 +1974,10 @@ function openCaseDetail(caseId) {
   document.getElementById('cd-count').textContent     = replies.filter(r => r.reply_type === 'accept').length;
   document.getElementById('cd-confirmed').textContent = replies.filter(r => r.reply_type === 'confirm').length;
   document.getElementById('cd-required').textContent  = c.required_count || 0;
+  // 進度回報筆數標示
+  const progressCount = replies.filter(r => r.reply_type === 'progress').length;
+  const progressTab = document.querySelector('#modal-case-detail .tab[onclick*="progress"]');
+  if (progressTab) progressTab.textContent = `📊 進度回報${progressCount ? ` (${progressCount})` : ''}`;
 
   // 重設 tab
   document.querySelectorAll('#modal-case-detail .tab').forEach((t,i) => t.classList.toggle('active', i===0));
@@ -1953,11 +1994,13 @@ function cdTab(type, btn) {
 function renderCdList(type) {
   const c = state.currentCase;
   if (!c) return;
-  const replies = (c.replies || []).filter(r => r.reply_type === type);
+  // 進度回報依時間倒序顯示（最新在最上）
+  let replies = (c.replies || []).filter(r => r.reply_type === type);
+  if (type === 'progress') replies = [...replies].reverse();
   const el = document.getElementById('cd-list');
-  const typeLabel = { accept:'報名中', confirm:'已確認', standby:'候補', reject:'婉拒' };
+  const typeLabel = { accept:'報名中', confirm:'已確認', standby:'候補', progress:'進度回報', reject:'婉拒' };
   if (!replies.length) {
-    el.innerHTML = `<div class="loading-row">目前無${typeLabel[type]||''}名單</div>`;
+    el.innerHTML = `<div class="loading-row">目前無${typeLabel[type]||''}記錄</div>`;
     return;
   }
   el.innerHTML = replies.map(r => `
@@ -1965,7 +2008,8 @@ function renderCdList(type) {
       <div class="av av-g">${(r.vol_name||'?').slice(0,1)}</div>
       <div class="vr-info">
         <div class="vr-name">${r.vol_name||'—'}</div>
-        <div class="vr-meta">${fmtDate(r.replied_date)} ・ ${r.content||'（無留言）'}</div>
+        <div class="vr-meta">${fmtDate(r.replied_date)}</div>
+        ${r.content ? `<div style="margin-top:4px;font-size:12px;color:var(--text-primary);background:var(--surface);border-radius:6px;padding:6px 10px;">${r.content}</div>` : ''}
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0;">
         ${type === 'accept' ? `
@@ -1979,6 +2023,7 @@ function renderCdList(type) {
           <button class="btn btn-sm btn-primary"
             onclick="confirmParticipantAction('${r.reply_id}','${r.vol_name}','${r.vol_id}','${c.case_id}')">✅ 確認</button>
         ` : ''}
+        ${type === 'progress' ? `<span class="chip chip-blue">📊 進度更新</span>` : ''}
         ${type === 'reject' ? `<span class="chip chip-red">❌ 婉拒</span>` : ''}
       </div>
     </div>
@@ -2173,11 +2218,20 @@ function updateBadges() {
 // ═══════════════════════════════════════
 function setRType(t, btn) {
   state.replyType = t;
-  ['rtype-accept','rtype-reject','rtype-ask'].forEach(id => {
+  ['rtype-accept','rtype-reject','rtype-ask','rtype-progress'].forEach(id => {
     const b = document.getElementById(id);
     if (b) b.className = 'btn btn-outline btn-sm';
   });
   btn.className = 'btn btn-primary btn-sm';
+  // 顯示對應提示
+  ['accept','progress','reject'].forEach(k => {
+    const el = document.getElementById('reply-hint-' + k);
+    if (el) el.style.display = (t === k) ? '' : 'none';
+  });
+  // 更新佔位文字
+  const ph = { accept:'說明您接受此任務（可留空）', progress:'例：已完成現場勘查，預計明天完成作業...', ask:'詢問任務細節或相關問題...', reject:'說明無法接受的原因（可留空）' };
+  const ta = document.getElementById('reply-content');
+  if (ta) ta.placeholder = ph[t] || '輸入您的回覆訊息...';
 }
 
 // ═══════════════════════════════════════
@@ -2225,57 +2279,4 @@ function fmtDate(d) {
 function fmtTime(d) {
   if (!d) return '—';
   const dt = new Date(d);
-  if (isNaN(dt)) return '—';
-  return dt.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
-}
-
-// ═══════════════════════════════════════
-// DEMO DATA (GAS 未連線時顯示)
-// ═══════════════════════════════════════
-function getDemoVols() {
-  return [
-    { vol_id:'V-0142', name:'陳志明', status:'上工中', total_hours:42, level:'silver', skills:['急救CPR','長照服務'], group_id:'社區清潔組' },
-    { vol_id:'V-0098', name:'林美華', status:'上工中', total_hours:68, level:'silver', skills:['長照服務','台語溝通'], group_id:'長照服務組' },
-    { vol_id:'V-0063', name:'王大明', status:'待命',   total_hours:31, level:'bronze', skills:['有駕照','清潔整理'], group_id:'機動支援組' },
-    { vol_id:'V-0211', name:'張秀蘭', status:'休息',   total_hours:15, level:'bronze', skills:['攝影紀錄'], group_id:'' },
-  ];
-}
-function getDemoCases() {
-  return [
-    { case_id:'C-001', title:'週末社區打掃活動協助', location:'台東市中心廣場', case_date:'2025-04-26', required_count:8, accepted_count:5, status:'待派案', priority:'urgent' },
-    { case_id:'C-002', title:'老人院陪伴服務', location:'馬蘭榮譽國民之家', case_date:'2025-04-28', required_count:5, accepted_count:5, status:'執行中', priority:'normal' },
-    { case_id:'C-003', title:'急救培訓課程助教', location:'消防局訓練中心', case_date:'2025-04-20', required_count:3, accepted_count:3, status:'已結案', priority:'normal' },
-  ];
-}
-function getDemoGroups() {
-  return [
-    { group_id:'G-01', group_name:'社區清潔組', icon:'🧹', leader:'林主任', member_count:18 },
-    { group_id:'G-02', group_name:'長照服務組', icon:'👴', leader:'王組長', member_count:12 },
-    { group_id:'G-03', group_name:'機動支援組', icon:'🚗', leader:'陳隊長', member_count:8 },
-  ];
-}
-function getDemoMsgs() {
-  return [
-    { msg_id:'M-01', type:'emergency', title:'週六緊急集合通知', content:'請準時至台東文化中心報到', target:'all', sender:'林主任', sent_date:'2025-04-23T14:30:00' },
-    { msg_id:'M-02', type:'normal', title:'老人院服務提醒', content:'本週日下午請準時到場', target:'all', sender:'王組長', sent_date:'2025-04-22T09:00:00' },
-  ];
-}
-function getDemoCheckins() {
-  return [
-    { record_id:'R-01', vol_id:'V-DEMO', checkin_time:'2025-04-22T09:15:00', checkout_time:'2025-04-22T16:30:00', hours:7.25, task:'社區清潔', verified:true, date:'2025-04-22' },
-    { record_id:'R-02', vol_id:'V-DEMO', checkin_time:'2025-04-20T08:00:00', checkout_time:'2025-04-20T12:00:00', hours:4, task:'急救培訓', verified:true, date:'2025-04-20' },
-  ];
-}
-function getDemoStats() {
-  return { total_volunteers:128, available:34, on_duty:8, active_cases:7, pending_cases:4, total_hours:1284 };
-}
-
-// ═══════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════
-// 預填設定欄位（供進階調整用）
-document.getElementById('cfg-url').value   = state.gasUrl;
-document.getElementById('cfg-token').value = state.token;
-</script>
-</body>
-</html>
+  if (isNaN(d
