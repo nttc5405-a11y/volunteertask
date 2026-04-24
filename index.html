@@ -296,6 +296,7 @@ tr:hover td{background:var(--surface);}
 
       <!-- 管理員登入 -->
       <div id="login-admin" class="hidden">
+        <div id="admin-conn-hint" style="display:none;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;font-weight:600;"></div>
         <div class="fg">
           <label class="fl">手機號碼</label>
           <input class="fi" id="admin-user" placeholder="0912-345-678">
@@ -307,6 +308,9 @@ tr:hover td{background:var(--surface);}
         <button class="btn btn-amber btn-full" onclick="doLogin('admin')" style="margin-top:8px;">
           登入管理端
         </button>
+        <p style="text-align:center;font-size:11px;color:var(--text-muted);margin-top:10px;">
+          管理員帳號需在 volunteers 工作表設定 role = admin
+        </p>
       </div>
 
       <!-- 申請加入 -->
@@ -1040,13 +1044,20 @@ async function gasPost(action, data = {}) {
       body: JSON.stringify({ action, token: state.token, data }),
     });
     const d = await r.json();
-    if (d.status === 'error') throw new Error(d.message);
+    if (d.status === 'error') {
+      // 回傳結構化錯誤，讓呼叫端可以顯示具體訊息
+      return { __gasError: true, message: d.message };
+    }
     return d.data;
   } catch (e) {
     console.warn('GAS POST error:', e);
-    return null;
+    // 網路層錯誤（後端不通、CORS 等）
+    return { __gasError: true, message: '無法連接後端，請確認 GAS 已部署且 URL 正確' };
   }
 }
+
+// gasPost 結果判斷工具：排除錯誤物件
+function gasOk(d) { return d && !d.__gasError; }
 
 function setApiStatus(s) {
   const el = document.getElementById('api-status');
@@ -1095,6 +1106,34 @@ function switchLoginTab(role, btn) {
   document.getElementById('login-member').classList.toggle('hidden', role !== 'member');
   document.getElementById('login-admin').classList.toggle('hidden', role !== 'admin');
   document.getElementById('login-apply').classList.toggle('hidden', role !== 'apply');
+
+  // 切到管理員或申請頁籤時，檢查 GAS 是否可用
+  if (role === 'admin') {
+    const hint = document.getElementById('admin-conn-hint');
+    if (!hint) return;
+    if (!state.gasUrl) {
+      hint.style.display = '';
+      hint.style.background = 'var(--crimson-pale)';
+      hint.style.color = 'var(--crimson)';
+      hint.textContent = '❌ 未設定 GAS URL，請先至設定頁填寫後端位址';
+      return;
+    }
+    hint.style.display = '';
+    hint.style.background = 'var(--sky-pale)';
+    hint.style.color = 'var(--sky)';
+    hint.textContent = '⏳ 正在檢查後端連線...';
+    gasGet('ping').then(d => {
+      if (d) {
+        hint.style.background = 'var(--sage-pale)';
+        hint.style.color = 'var(--sage)';
+        hint.textContent = '✅ 後端連線正常，請輸入帳號密碼';
+      } else {
+        hint.style.background = 'var(--crimson-pale)';
+        hint.style.color = 'var(--crimson)';
+        hint.textContent = '❌ 後端無回應，請確認 GAS 已重新部署並設定存取權限為「所有人」';
+      }
+    });
+  }
 }
 
 async function doLogin(role) {
@@ -1102,22 +1141,34 @@ async function doLogin(role) {
     const phone = document.getElementById('admin-user').value.trim().replace(/-/g,'');
     const p     = document.getElementById('admin-pass').value;
     if (!phone || !p) { showToast('⚠️ 請輸入手機號碼與密碼'); return; }
+    const btn = document.querySelector('#login-admin button[onclick]');
+    if (btn) { btn.textContent = '驗證中...'; btn.disabled = true; }
     const d = await gasPost('login', { phone, password: p });
-    if (d && d.role === 'admin') {
+    if (btn) { btn.textContent = '登入管理端'; btn.disabled = false; }
+    if (d && d.__gasError) {
+      showToast('❌ ' + d.message);
+    } else if (d && d.role === 'admin') {
       state.user = d; state.role = 'admin'; enterApp('admin');
     } else if (d) {
-      showToast('❌ 此帳號沒有管理員權限');
+      showToast('❌ 此帳號沒有管理員權限（role 欄位需設為 admin）');
     } else {
-      showToast('❌ 手機號碼或密碼錯誤');
+      showToast('❌ 登入失敗，請確認 GAS 已部署');
     }
   } else {
     const phone = document.getElementById('login-phone').value.trim().replace(/-/g,'');
     const pass  = document.getElementById('login-pass').value.trim().replace(/-/g,'');
     // Try GAS first
     if (state.gasUrl) {
+      const btn = document.querySelector('#login-member button[onclick]');
+      if (btn) { btn.textContent = '驗證中...'; btn.disabled = true; }
       const d = await gasPost('login', { phone, password: pass });
+      if (btn) { btn.textContent = '登入會員端'; btn.disabled = false; }
+      if (d && d.__gasError) {
+        showToast('❌ ' + d.message);
+        return;
+      }
       if (d) { state.user = d; state.role = 'member'; enterApp('member'); return; }
-      showToast('❌ 帳號或密碼錯誤，或帳號尚未審核通過');
+      showToast('❌ 登入失敗，請確認 GAS 已部署');
       return;
     }
     // Demo fallback（只在未設定 GAS URL 時使用）
@@ -1149,6 +1200,10 @@ async function doApply() {
   btn.textContent = '送出中...'; btn.disabled = true;
   const result = await gasPost('applyVolunteer', { name, phone, email, password: pass });
   btn.textContent = '送出申請'; btn.disabled = false;
+  if (result && result.__gasError) {
+    showToast('❌ ' + result.message);
+    return;
+  }
   if (result) {
     showToast('✅ 申請已送出！請等候管理員審核通知');
     ['apply-name','apply-phone','apply-email','apply-pass','apply-pass2'].forEach(id => {
@@ -1158,7 +1213,7 @@ async function doApply() {
     const firstTab = document.querySelector('.login-tab');
     if (firstTab) switchLoginTab('member', firstTab);
   } else {
-    showToast('❌ 申請送出失敗，請稍後再試');
+    showToast('❌ 申請送出失敗，請確認 GAS 後端已正確部署（applyVolunteer 為公開端點）');
   }
 }
 
@@ -2279,4 +2334,57 @@ function fmtDate(d) {
 function fmtTime(d) {
   if (!d) return '—';
   const dt = new Date(d);
-  if (isNaN(d
+  if (isNaN(dt)) return '—';
+  return dt.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+}
+
+// ═══════════════════════════════════════
+// DEMO DATA (GAS 未連線時顯示)
+// ═══════════════════════════════════════
+function getDemoVols() {
+  return [
+    { vol_id:'V-0142', name:'陳志明', status:'上工中', total_hours:42, level:'silver', skills:['急救CPR','長照服務'], group_id:'社區清潔組' },
+    { vol_id:'V-0098', name:'林美華', status:'上工中', total_hours:68, level:'silver', skills:['長照服務','台語溝通'], group_id:'長照服務組' },
+    { vol_id:'V-0063', name:'王大明', status:'待命',   total_hours:31, level:'bronze', skills:['有駕照','清潔整理'], group_id:'機動支援組' },
+    { vol_id:'V-0211', name:'張秀蘭', status:'休息',   total_hours:15, level:'bronze', skills:['攝影紀錄'], group_id:'' },
+  ];
+}
+function getDemoCases() {
+  return [
+    { case_id:'C-001', title:'週末社區打掃活動協助', location:'台東市中心廣場', case_date:'2025-04-26', required_count:8, accepted_count:5, status:'待派案', priority:'urgent' },
+    { case_id:'C-002', title:'老人院陪伴服務', location:'馬蘭榮譽國民之家', case_date:'2025-04-28', required_count:5, accepted_count:5, status:'執行中', priority:'normal' },
+    { case_id:'C-003', title:'急救培訓課程助教', location:'消防局訓練中心', case_date:'2025-04-20', required_count:3, accepted_count:3, status:'已結案', priority:'normal' },
+  ];
+}
+function getDemoGroups() {
+  return [
+    { group_id:'G-01', group_name:'社區清潔組', icon:'🧹', leader:'林主任', member_count:18 },
+    { group_id:'G-02', group_name:'長照服務組', icon:'👴', leader:'王組長', member_count:12 },
+    { group_id:'G-03', group_name:'機動支援組', icon:'🚗', leader:'陳隊長', member_count:8 },
+  ];
+}
+function getDemoMsgs() {
+  return [
+    { msg_id:'M-01', type:'emergency', title:'週六緊急集合通知', content:'請準時至台東文化中心報到', target:'all', sender:'林主任', sent_date:'2025-04-23T14:30:00' },
+    { msg_id:'M-02', type:'normal', title:'老人院服務提醒', content:'本週日下午請準時到場', target:'all', sender:'王組長', sent_date:'2025-04-22T09:00:00' },
+  ];
+}
+function getDemoCheckins() {
+  return [
+    { record_id:'R-01', vol_id:'V-DEMO', checkin_time:'2025-04-22T09:15:00', checkout_time:'2025-04-22T16:30:00', hours:7.25, task:'社區清潔', verified:true, date:'2025-04-22' },
+    { record_id:'R-02', vol_id:'V-DEMO', checkin_time:'2025-04-20T08:00:00', checkout_time:'2025-04-20T12:00:00', hours:4, task:'急救培訓', verified:true, date:'2025-04-20' },
+  ];
+}
+function getDemoStats() {
+  return { total_volunteers:128, available:34, on_duty:8, active_cases:7, pending_cases:4, total_hours:1284 };
+}
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+// 預填設定欄位（供進階調整用）
+document.getElementById('cfg-url').value   = state.gasUrl;
+document.getElementById('cfg-token').value = state.token;
+</script>
+</body>
+</html>
